@@ -27,6 +27,7 @@ import qualified Data.Yaml as Y
 
 import Control.Monad (foldM)
 import Control.Monad.Except
+import Control.Monad.Fix (fix)
 import Control.Monad.Trans
 
 import Data.Time.Clock.POSIX (getPOSIXTime)
@@ -75,8 +76,8 @@ data Entry = Entry
   , entryCommentsUrl :: String
   }
   deriving (Show, Generic)
-newtype ListResponse = ListResponse Artists deriving Show
-newtype ArtistResponse = ArtistResponse Releases deriving Show
+data ListResponse = ListResponse Int Int Artists deriving Show
+data ArtistResponse = ArtistResponse Int Int Releases deriving Show
 
 opts :: Options
 opts = defaultOptions{fieldLabelModifier = camelFrom2, rejectUnknownFields = True}
@@ -164,12 +165,18 @@ instance ToJSON Releases where
 instance FromJSON ListResponse where
   parseJSON = withObject "list_response" \w -> do
     artists <- w .: "items"
-    pure $ ListResponse artists
+    (page, pages) <-
+      w .: "pagination" >>= withObject "pagination" \v -> do
+        (,) <$> v .: "page" <*> v .: "pages"
+    pure $ ListResponse page pages artists
 
 instance FromJSON ArtistResponse where
   parseJSON = withObject "artist_response" \w -> do
     artists <- w .: "releases"
-    pure $ ArtistResponse artists
+    (page, pages) <-
+      w .: "pagination" >>= withObject "pagination" \v -> do
+        (,) <$> v .: "page" <*> v .: "pages"
+    pure $ ArtistResponse page pages artists
 
 userAgent :: ByteString
 userAgent = pack $ capitalize name <> "RssBot/" <> showVersion version <> " +" <> homepage
@@ -185,7 +192,7 @@ main =
     let dataFile = dataDir </> "attulus" </> "data.yaml"
 
     (Config{..}, saved) <- loadConfig dataFile
-    ListResponse artists <- requestList configDiscogs
+    artists <- requestList configDiscogs
     let combined = joinArtists artists saved
         Artists targets = takeOldest 1 combined
     toSave <- lift $ foldM (processArtist configDiscogs configMiniflux) saved targets
@@ -195,7 +202,7 @@ processArtist :: DiscogsConfig -> MinifluxConfig -> Artists -> Artist -> IO Arti
 processArtist configDiscogs configMiniflux saved artist =
   runExceptT (requestReleases configDiscogs artist) >>= \case
     Left err -> print err >> pure saved
-    Right (ArtistResponse releases) ->
+    Right releases ->
       updateArtist (artistId artist) (artistDisplayTitle artist) saved releases configMiniflux
 
 takeOldest :: Int -> Artists -> Artists
@@ -224,33 +231,45 @@ loadConfig dataFile = do
       >>= bool (pure def) (withExceptT show $ ExceptT $ Y.decodeFileEither dataFile)
   pure (config, artists)
 
-requestList :: DiscogsConfig -> ExceptT String IO ListResponse
+requestList :: DiscogsConfig -> ExceptT String IO Artists
 requestList DiscogsConfig{..} = do
   initReq <- parseRequest "https://api.discogs.com"
-  let request =
-        initReq
-          { path = "/lists/" <> pack discogsList
-          , queryString = "token=" <> pack discogsKey
-          , requestHeaders = [("user-agent", userAgent)]
-          }
   manager <- lift newTlsManager
-  ExceptT $ withResponse request manager \response -> do
-    throwErrorStatusCodes request response
-    A.eitherDecode . fromStrict . fold <$> brConsume (responseBody response)
 
-requestReleases :: DiscogsConfig -> Artist -> ExceptT String IO ArtistResponse
+  (_, artists) <- flip fix (1, HM.empty) \go (page, saved) -> do
+    let request =
+          initReq
+            { path = "/lists/" <> pack discogsList
+            , queryString = "token=" <> pack discogsKey <> "&page=" <> pack (show page)
+            , requestHeaders = [("user-agent", userAgent)]
+            }
+    ListResponse _ pages (Artists artists) <- ExceptT $ withResponse request manager \response -> do
+      throwErrorStatusCodes request response
+      A.eitherDecode . fromStrict . fold <$> brConsume (responseBody response)
+    if page < pages
+      then go (succ page, HM.union artists saved)
+      else pure (page, HM.union artists saved)
+  return $ Artists artists
+
+requestReleases :: DiscogsConfig -> Artist -> ExceptT String IO Releases
 requestReleases DiscogsConfig{..} Artist{..} = do
   initReq <- parseRequest "https://api.discogs.com"
-  let request =
-        initReq
-          { path = "/artists/" <> pack (show artistId) <> "/releases"
-          , queryString = "token=" <> pack discogsKey
-          , requestHeaders = [("user-agent", userAgent)]
-          }
   manager <- lift newTlsManager
-  ExceptT $ withResponse request manager \response -> do
-    throwErrorStatusCodes request response
-    A.eitherDecode . fromStrict . fold <$> brConsume (responseBody response)
+
+  (_, releases) <- flip fix (1, HM.empty) \go (page, saved) -> do
+    let request =
+          initReq
+            { path = "/artists/" <> pack (show artistId) <> "/releases"
+            , queryString = "token=" <> pack discogsKey <> "&page=" <> pack (show page)
+            , requestHeaders = [("user-agent", userAgent)]
+            }
+    ArtistResponse _ pages (Releases releases) <- ExceptT $ withResponse request manager \response -> do
+      throwErrorStatusCodes request response
+      A.eitherDecode . fromStrict . fold <$> brConsume (responseBody response)
+    if page < pages
+      then go (succ page, HM.union releases saved)
+      else pure (page, HM.union releases saved)
+  return $ Releases releases
 
 updateArtist :: Int -> String -> Artists -> Releases -> MinifluxConfig -> IO Artists
 updateArtist artistId artistTitle artists (Releases releases) config = do
@@ -282,8 +301,8 @@ releaseToEntry author Release{..} =
     , entryStarred = False
     , entryTags = []
     , entryExternalId = kebabCase author <> "-" <> kebabCase releaseTitle
-    --, entryCommentsUrl = "example.com"
-    , entryCommentsUrl = ""
+    , -- , entryCommentsUrl = "example.com"
+      entryCommentsUrl = ""
     }
 
 kebabCase :: String -> String
