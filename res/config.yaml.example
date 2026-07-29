@@ -1,0 +1,8 @@
+miniflux:
+  key: "qwerty"
+  feed: "42"
+discogs:
+  key: "qwerty"
+  list: "000000"
+
+# vim: filetype=yaml
