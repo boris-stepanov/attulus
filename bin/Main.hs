@@ -172,11 +172,17 @@ instance FromJSON ListResponse where
 
 instance FromJSON ArtistResponse where
   parseJSON = withObject "artist_response" \w -> do
-    artists <- w .: "releases"
+    Releases releases <- w .: "releases"
     (page, pages) <-
       w .:? "pagination" .!= object ["page" .= (1 :: Int), "pages" .= (1 :: Int)] >>= withObject "pagination" \v -> do
         (,) <$> v .: "page" <*> v .: "pages"
-    pure $ ArtistResponse page pages artists
+    pure $
+      ArtistResponse
+        page
+        pages
+        ( Releases $
+            HM.filter (\Release{..} -> releaseType == "master" && releaseRole == "Main") releases
+        )
 
 userAgent :: ByteString
 userAgent = pack $ capitalize name <> "RssBot/" <> showVersion version <> " +" <> homepage
@@ -278,7 +284,7 @@ updateArtist artistId artistTitle artists (Releases releases) config = do
     Releases
       <$> foldM
         ( \hm Release{..} ->
-            if HM.member releaseId hm || releaseType /= "master" || releaseRole /= "Main"
+            if HM.member releaseId hm
               then pure hm
               else updateRelease artistTitle config hm Release{..}
         )
