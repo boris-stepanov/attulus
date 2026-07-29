@@ -166,7 +166,7 @@ instance FromJSON ListResponse where
   parseJSON = withObject "list_response" \w -> do
     artists <- w .: "items"
     (page, pages) <-
-      w .: "pagination" >>= withObject "pagination" \v -> do
+      w .:? "pagination" .!= object ["page" .= (1 :: Int), "pages" .= (1 :: Int)] >>= withObject "pagination" \v -> do
         (,) <$> v .: "page" <*> v .: "pages"
     pure $ ListResponse page pages artists
 
