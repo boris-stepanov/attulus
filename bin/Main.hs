@@ -174,7 +174,7 @@ instance FromJSON ArtistResponse where
   parseJSON = withObject "artist_response" \w -> do
     artists <- w .: "releases"
     (page, pages) <-
-      w .: "pagination" >>= withObject "pagination" \v -> do
+      w .:? "pagination" .!= object ["page" .= (1 :: Int), "pages" .= (1 :: Int)] >>= withObject "pagination" \v -> do
         (,) <$> v .: "page" <*> v .: "pages"
     pure $ ArtistResponse page pages artists
 
