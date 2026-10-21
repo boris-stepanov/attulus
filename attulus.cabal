@@ -1,6 +1,6 @@
 cabal-version:      3.14
 name:               attulus
-version:            0.1.0.1
+version:            0.2.0.1
 description:        RSS feed generator for discogs.com
 license:            AGPL-3.0-or-later
 license-file:       LICENSE
@@ -14,20 +14,50 @@ common warnings
 
 executable attulus
     import:           warnings
+    hs-source-dirs:   bin
     main-is:          Main.hs
+    build-depends:    attulus
+                    , base ^>=4.21.2.0
+
+                    , aeson
+                    , bytestring
+                    , crypton-connection
+                    , data-default
+                    , directory
+                    , effectful
+                    , filepath
+                    , http-client-effectful
+                    , log-effectful
+                    , text
+                    , time
+                    , unordered-containers
+                    , yaml
+    default-language: GHC2024
+
+library
+    import:           warnings
+    hs-source-dirs:   src
+    exposed-modules:  Attulus.Source
+                    , Attulus.Source.Discogs
+                    , Attulus.Source.Miniflux
+                    , Attulus.Source.Musicbrainz
+                    , Attulus.Source.Types
     build-depends:    base ^>=4.21.2.0
                     , aeson
                     , bytestring
                     , crypton-connection
                     , data-default
                     , directory
+                    , effectful
                     , filepath
                     , http-client
+                    , http-client-effectful
                     , http-client-tls
-                    , mtl
+                    , http-types
+                    , log-effectful
+                    , text
                     , time
                     , unordered-containers
                     , yaml
     other-modules:    PackageInfo_attulus
-    hs-source-dirs:   bin
     default-language: GHC2024
