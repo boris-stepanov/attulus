@@ -95,7 +95,7 @@ handleDiscogs :: LinkHandler DiscogsConfig
 handleDiscogs url applyNews config = do
   Releases releases <- requestReleases url config
   applyNews (getNew releases)
-  logInfo_ ("Sent " <> T.show releases)
+  logInfo_ ("Sent " <> T.show (HM.size releases) <> " entries")
  where
   getNew :: HM.HashMap Int Release -> String -> Maybe [Int] -> ([Entry], Maybe [Int])
   getNew releases artist old' =

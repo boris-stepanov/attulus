@@ -40,11 +40,21 @@ main = runEff
   . withConfig
   . withLog
   . withSaved
+  . withIgnorelist
   . runConcurrent
   $ do
     logInfo_ "Start Attulus"
     artists <- asks configMusicbrainz >>= \r -> runReader r requestList
     withOldest artists processArtist
+
+withIgnorelist
+  :: (IOE :> es, Fail :> es, Log :> es) => Eff (Reader Ignorelist : es) a -> Eff es a
+withIgnorelist run = do
+  f <- liftIO (lookupEnv "XDG_CONFIG_HOME")
+      >>= maybe (fail "No XDG_CONFIG_HOME env variable set") pure
+  content <- liftIO $ readFile (f </> "attulus" </> "ignorelist")
+  runReader (Ignorelist $ lines content) run
+
 
 withConfig
   :: (IOE :> es, Fail :> es) => Eff (Reader Config : es) a -> Eff es a
@@ -94,6 +104,7 @@ withLog run = do
 processArtist
   :: ( Concurrent :> es
      , Reader Config :> es
+     , Reader Ignorelist :> es
      , IOE :> es
      , Log :> es
      , Fail :> es
@@ -136,42 +147,15 @@ processArtist = do
 
 handleLink
   :: forall es
-   . (Concurrent :> es, IOE :> es, Log :> es, Reader Config :> es, Fail :> es)
+   . (Concurrent :> es, IOE :> es, Log :> es, Reader Config :> es, Fail :> es, Reader Ignorelist :> es)
   => TVar Artist -> TQueue (Either () Entry) -> Link -> Eff es ()
 handleLink shared entries Link{..}
-  | typ
-      `elem` [ "allmusic"
-             , "bandcamp"
-             , "bandsintown"
-             , "bbc music page"
-             , "free streaming"
-             , "imdb"
-             , "last.fm"
-             , "lyrics"
-             , "myspace"
-             , "official homepage"
-             , "other databases"
-             , "purchase for download"
-             , "purchase for mail-order"
-             , "secondhandsongs"
-             , "setlistfm"
-             , "social network"
-             , "songkick"
-             , "soundcloud"
-             , "streaming"
-             , "ticketing"
-             , "viaf"
-             , "video channel"
-             , "wikidata"
-             , "youtube music"
-             , "youtube"
-             ] =
-      pure ()
   | typ == "discogs" = asks configDiscogs >>= mkHandle handleDiscogs "discogs"
   | typ == "ticketmaster" =
       asks configTicketMaster >>= mkHandle handleTicketMaster "ticketmaster"
-  | otherwise =
-      atomically
+  | otherwise = do
+      Ignorelist list <- ask
+      unless (typ `elem` list) $ atomically
         ( writeTQueue entries $
             Right (Entry ("Unknown type " <> typ) "linkUrl" "Musicbrainz" "" linkType)
         )
@@ -184,5 +168,6 @@ handleLink shared entries Link{..}
     writeTVar shared (Artist{artistNews = newArtist, ..})
     forM_ newEntries (writeTQueue entries . Right)
 
+-- v2 api has no clean way to get concerts by legacy artist id
 handleTicketMaster :: LinkHandler TicketMasterConfig
-handleTicketMaster url applyNews config = pure ()
+handleTicketMaster _ _ _ = pure ()

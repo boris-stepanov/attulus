@@ -1,14 +1,15 @@
 module Attulus.Source (
-  Links (..),
-  Link (..),
-  Artists (..),
   Artist (..),
-  Config (..),
+  Artists (..),
   AttulusConfig (..),
+  Config (..),
+  Entry (..),
+  Ignorelist (..),
+  Link (..),
+  LinkHandler,
+  Links (..),
   MinifluxConfig (..),
   TicketMasterConfig (..),
-  Entry (..),
-  LinkHandler,
   requestList,
   requestArtist,
   pushEntry,
@@ -25,6 +26,8 @@ import Effectful.Log
 import GHC.Generics
 
 --------------------------------------- Types ----------------------------------
+
+newtype Ignorelist = Ignorelist [String]
 
 data Config = Config
   { configMusicbrainz :: MusicbrainzConfig
