@@ -30,7 +30,7 @@ import Effectful.Concurrent.STM
 import Effectful.Fail
 import Effectful.Log
 import Effectful.Reader.Static (Reader, ask, asks, runReader)
-import Effectful.State.Static.Local (State, execState, get, put)
+import Effectful.State.Static.Local (State, execState, get, gets, put)
 
 --------------------------------------- IO -------------------------------------
 
@@ -50,11 +50,11 @@ main = runEff
 withIgnorelist
   :: (IOE :> es, Fail :> es, Log :> es) => Eff (Reader Ignorelist : es) a -> Eff es a
 withIgnorelist run = do
-  f <- liftIO (lookupEnv "XDG_CONFIG_HOME")
+  f <-
+    liftIO (lookupEnv "XDG_CONFIG_HOME")
       >>= maybe (fail "No XDG_CONFIG_HOME env variable set") pure
   content <- liftIO $ readFile (f </> "attulus" </> "ignorelist")
   runReader (Ignorelist $ lines content) run
-
 
 withConfig
   :: (IOE :> es, Fail :> es) => Eff (Reader Config : es) a -> Eff es a
@@ -82,8 +82,10 @@ withSaved run = do
   new <- execState artists run
   liftIO $ Y.encodeFile dataFile new
 
-withOldest :: State Artists :> es => Artists -> Eff (State Artist : es) a -> Eff es ()
+withOldest
+  :: (Log :> es, State Artists :> es) => Artists -> Eff (State Artist : es) a -> Eff es ()
 withOldest (Artists new) run = do
+  logInfo_ "Fetching collection"
   Artists old <- get
   let merged = HM.unionWith (\l' r' -> l'{artistDisplayTitle = artistDisplayTitle r'}) old new
       (key, oldest) =
@@ -112,6 +114,7 @@ processArtist
      )
   => Eff es ()
 processArtist = do
+  gets artistDisplayTitle >>= logInfo_ . ("Processing " <>) . T.show
   Config{..} <- ask
   shared <- get >>= newTVarIO
   entries <- newTQueueIO
@@ -147,7 +150,13 @@ processArtist = do
 
 handleLink
   :: forall es
-   . (Concurrent :> es, IOE :> es, Log :> es, Reader Config :> es, Fail :> es, Reader Ignorelist :> es)
+   . ( Concurrent :> es
+     , IOE :> es
+     , Log :> es
+     , Reader Config :> es
+     , Fail :> es
+     , Reader Ignorelist :> es
+     )
   => TVar Artist -> TQueue (Either () Entry) -> Link -> Eff es ()
 handleLink shared entries Link{..}
   | typ == "discogs" = asks configDiscogs >>= mkHandle handleDiscogs "discogs"
@@ -155,10 +164,11 @@ handleLink shared entries Link{..}
       asks configTicketMaster >>= mkHandle handleTicketMaster "ticketmaster"
   | otherwise = do
       Ignorelist list <- ask
-      unless (typ `elem` list) $ atomically
-        ( writeTQueue entries $
-            Right (Entry ("Unknown type " <> typ) "linkUrl" "Musicbrainz" "" linkType)
-        )
+      unless (typ `elem` list) $
+        atomically
+          ( writeTQueue entries $
+              Right (Entry ("Unknown type " <> typ) "linkUrl" "Musicbrainz" "" linkType)
+          )
  where
   typ = toLower <$> linkType
   mkHandle :: LinkHandler c -> String -> c -> Eff es ()

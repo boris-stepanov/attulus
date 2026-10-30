@@ -11,6 +11,7 @@ import Prelude
 import GHC.Generics
 
 import Data.Aeson.Types
+import Data.Bool (bool)
 import Data.ByteString.Char8 (pack, unpack)
 import Data.Char
 import Data.Default
@@ -101,7 +102,10 @@ handleDiscogs url applyNews config = do
   getNew releases artist old' =
     let old = HS.fromList (fromMaybe mempty old')
         sorted = sortBy (\(_, rx) (_, ry) -> compare rx ry) $ HM.toList releases
-        (entries, new) = foldMap (\(id', r) -> ([releaseToEntry artist r], HS.singleton id')) sorted
+        (entries, new) =
+          foldMap
+            (\(id', r) -> (bool [releaseToEntry artist r] [] (HS.member id' old), HS.singleton id'))
+            sorted
      in (entries, Just (HS.toList (old <> new)))
 
 requestReleases

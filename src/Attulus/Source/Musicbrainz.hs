@@ -105,7 +105,7 @@ requestList = runHttpClientWith tlsManagerSettings do
   liftIO $ writeIORef authToken token
 
   collectionRequest' <-
-    parseRequest $ "https://musicbrainz.org/ws/2/artist?collection=" <> musicbrainzCollection
+    parseRequest $ "https://musicbrainz.org/ws/2/artist?limit=500&collection=" <> musicbrainzCollection
   let collectionRequest =
         collectionRequest'
           { requestHeaders =
@@ -117,7 +117,6 @@ requestList = runHttpClientWith tlsManagerSettings do
 
   sleep 2
 
-  logTrace_ "Fetching collection"
   ArtistsView artists <- withResponseRetry 5 collectionRequest parseBody
   return artists
 
